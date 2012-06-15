@@ -1,4 +1,4 @@
-----------------------------------------------------------------------------
+---------------------------------------------------------------------------
 -- CMQ - A lightweight, asynchronous high-performance messaging queue for
 -- the cloud.
 -- Copyright   : (c) 2012 Joerg Fritsch
@@ -9,7 +9,7 @@
 -- Portability : GHC
 --
 -- A message queue based on the UDP protocol.
------------------------------------------------------------------------------
+----------------------------------------------------------------------------
 
 module CMQ (newRq, cwPush, cwPop) where
 
