@@ -101,7 +101,6 @@ appendMsg newmsgs key qcfg m =
 insertSglton :: String -> KEY -> TPSQ -> TMap -> IO ()
 insertSglton newmsgs key q m = do
       time <- getPOSIXTime
-      print key
       atomically $ do
       qT <- readTVar q
       mT <- readTVar m
