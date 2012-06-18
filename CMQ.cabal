@@ -1,0 +1,40 @@
+name:               cmq-haskell
+version:            0.0.1
+synopsis:           cwmwl udp message queue
+category:           System
+license:            BSD3
+license-file:       LICENSE
+author:             Joerg Fritsch
+maintainer:         J.Fritsch@cs.cardiff.ac.uk
+copyright:          Copyright (c) 2012 cmq authors
+homepage:           http://github.com/viloocity/cmq/
+stability:          experimental
+tested-With:        GHC == 7.4.1
+cabal-version:      >= 1.8
+build-type:         Simple
+extra-source-files: README.md
+                  , AUTHORS
+                  , examples/*.hs
+description:
+    CMQ is a lightweight message queue using the UDP protocol as transport protocol. CMQ has been described in the paper "CMQ - A lightweight, asynchronous high-performance messaging queue for the cloud".
+
+    This library provides the initial CMQ version = 0.0.1
+
+library
+    hs-source-dirs:       src
+    exposed-modules:      System.CMQ
+    ghc-options:          -threaded -O2
+    build-depends:        base >= 3 && < 5
+                          , iproute
+                          , bytestring
+                          , network
+                          , mtl
+                          , containers
+                          , PSQueue
+                          , time
+                          , stm
+
+source-repository head
+    type:             git
+    location:         https://github.com/viloocity/CMQ
+

@@ -11,7 +11,7 @@
 -- A message queue based on the UDP protocol.
 ----------------------------------------------------------------------------
 
-module CMQ (newRq, cwPush, cwPop) where
+module System.CMQ (newRq, cwPush, cwPop) where
 
 import Data.Time
 import Data.Functor
