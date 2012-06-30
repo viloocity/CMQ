@@ -18,7 +18,7 @@ extra-source-files: README.md
 description:
     CMQ is a lightweight message queue using the UDP protocol as transport protocol. CMQ has been described in the paper "CMQ - A lightweight, asynchronous high-performance messaging queue for the cloud".
 
-    This library provides the initial CMQ version = 0.0.1
+    This library provides CMQ version = 0.0.12
 
 library
     hs-source-dirs:       src

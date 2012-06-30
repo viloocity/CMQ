@@ -1,24 +1,26 @@
 ---------------------------------------------------------------------------
 -- |
--- CMQ - A lightweight, asynchronous high-performance messaging queue for
--- the cloud.
--- Copyright   : (c) 2012 Joerg Fritsch
+-- Module     :   System.CMQ
+-- Copyright  :   Copyright (c) 2012 cmq authors
+-- License    :   BSD3
+-- Author     :   Joerg Fritsch
+-- Maintainer :   J.Fritsch@cs.cardiff.ac.uk
+-- Stability  :   Experimental
+-- Tested-With:   GHC == 7.4.1
 --
--- License     : BSD-style
--- Maintainer  : J.Fritsch@cs.cardiff.ac.uk
--- Stability   : experimental
--- Portability : GHC
---
--- A message queue based on the UDP protocol.
+-- CMQ, a UDP-based inherently asynchronous message queue to orchestrate messages, events and processes in the cloud.
 --
 ----------------------------------------------------------------------------
 
 module System.CMQ (
                    -- * The queue identifier (Token)
                    Cmq
-                   -- * IPv4 address of the destination node
+                   -- * IPv4 address 
+                   {-|
+                    Use 'read' @\"192.0.2.1\"@ :: 'IPv4', for example. Also, @\"192.0.2.1\"@ can be used as literal with OverloadedStrings.
+                   -}
                    , IPv4
-                   -- * The destination identifier (KEY)
+                   -- * Destination identifier (KEY)
                    , KEY
                    -- * Construction
                    , newRq
@@ -60,7 +62,7 @@ import Data.IP
 --qthresh = 1440 (MTU minus some overhead)
 --qthresh = 512 (most commen UDP packet size e.g. DNS)
 
-type KEY = ( IPv4 , Integer ) -- ^ The 'KEY' identifies the message destination in the format 'IPv4' address, Integer.  
+type KEY = ( IPv4 , Integer ) -- ^ The 'KEY' identifies the message destination in the format 'IPv4' address, Integer. The integer is reserved for future use e.g. as unique process identifier 
 type TPSQ = TVar (PSQ.PSQ KEY POSIXTime)
 type TMap a = TVar (Map.Map KEY [a]) 
 
@@ -93,6 +95,10 @@ getTChan = do
     return (cwchan c)
 
 -- | Builds and returns a new instance of Cmq.
+--
+-- @
+--  (token) <- newRq soc 512 200
+-- @
 
 newRq :: Serialize a => Socket -- ^ Socket does not need to be in connected state. 
          -> Int         -- ^ Maximum Queue length in bytes.
@@ -135,7 +141,11 @@ insertSglton newmsgs key q m = do
       writeTVar m (Map.insert key [newmsgs] mT)
       return ()
 
--- | A message is pushed to CMQ. 
+-- | /O(log n)/. Push a message to the queue.
+--
+-- @
+--  cwPush soc (\"192.168.35.69\", 0) (\"ping\" :: String) token 
+-- @
 
 cwPush :: Serialize a => Socket -> KEY -> a -> Cmq a -> IO ()
 cwPush s key newmsgs cmq = do
@@ -199,7 +209,18 @@ write2TChan msg mtch = do
         mapM_ (\x -> atomically $ writeTChan mtch x) msg
         return ()
 
--- | A message is popped of CMQ. The next value is read from the queue.
+-- | /O(1)/. A message is popped of CMQ. The next value is read from the queue.
+-- Use for example
+--
+-- @
+--   msg <- cwPop token :: IO (Maybe String)
+-- @
+--
+--  or with ScopedTypeVariables
+--
+-- @
+--   (msg :: Maybe String) <- cwPop token
+-- @
 
 cwPop :: Cmq a -> IO (Maybe a)
 cwPop cmq = do
