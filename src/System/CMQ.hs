@@ -11,7 +11,16 @@
 -- A message queue based on the UDP protocol.
 ----------------------------------------------------------------------------
 
-module System.CMQ (newRq, cwPush, cwPop) where
+module System.CMQ (
+                   -- The queue identifier
+                   Cmq
+                   -- * Construction
+                   , newRq
+                   -- * Insertion (Push Message)
+                   , cwPush
+                   -- * Quey (Pop a Message)
+                   , cwPop
+) where
 
 import Data.Time
 import Data.Functor
@@ -19,6 +28,7 @@ import Data.Time.Clock.POSIX
 import Data.List
 import Data.String
 import Data.Maybe
+import Data.Serialize as S
 import qualified Data.PSQueue as PSQ
 import qualified Data.Map as Map
 import Control.Concurrent
@@ -44,87 +54,100 @@ import Data.IP
 --qthresh = 1440 (MTU minus some overhead)
 --qthresh = 512 (most commen UDP packet size e.g. DNS)
 
-type KEY = (IPv4, Integer)
+type KEY = (IPv4, Integer) -- ^ The 'KEY' identifies the message destination in the format IPv4 address, Integer.
 type TPSQ = TVar (PSQ.PSQ KEY POSIXTime)
-type TMap = TVar (Map.Map KEY [String])
+type TMap a = TVar (Map.Map KEY [a]) 
 
-data Qcfg = Qcfg { qthresh :: Int, tdelay :: Rational, cwpsq :: TPSQ, cwmap :: TMap, cwchan :: TChan String }
+-- | This module defines the type Cmq.
+-- | @k :-> p@ binds the key @k@ with the priority @p@.
+data Cmq a = Cmq { qthresh :: Int, tdelay :: Rational, cwpsq :: TPSQ, cwmap :: TMap a, cwchan :: TChan a }
 
+getQthresh :: Reader (Cmq a) Int
 getQthresh = do
    c <- ask
    return (qthresh c)
 
+getDelay :: Reader (Cmq a) Rational
 getDelay = do
    c <- ask
    return (tdelay c)
 
+getTMap :: Reader (Cmq a) (TMap a)
 getTMap = do
    c <- ask
    return (cwmap c)
 
+getTPsq :: Reader (Cmq a) TPSQ
 getTPsq = do
    c <- ask
    return (cwpsq c)
 
+getTChan :: Reader (Cmq a) (TChan a)
 getTChan = do
     c <- ask
     return (cwchan c)
 
-newRq :: Socket -> Int -> Rational -> IO (Qcfg)
+-- | Builds and returns a new instance of Cmq.
+
+newRq :: Serialize a => Socket -- ^ Socket must not be in connected state. 
+         -> Int         -- ^ Maximum Queue length in bytes.
+         -> Rational    -- ^ Maximum Queue age in ms.
+         -> IO (Cmq a)  -- ^ Token returned to identify the Queue.
 newRq s qthresh tdelay = do
       q <- atomically $ newTVar (PSQ.empty)
       m <- atomically $ newTVar (Map.empty)
       t <- newTChanIO
-      let qcfg = Qcfg qthresh tdelay q m t
-      forkIO $ loopMyQ s qcfg q m
+      let cmq = Cmq qthresh tdelay q m t
+      forkIO $ loopMyQ s cmq q m
       forkIO $ loadTChan s t
-      return (qcfg)
+      return cmq
 
-loadTChan :: Socket -> TChan String -> IO ()
+loadTChan :: Serialize a => Socket -> TChan a -> IO ()
 loadTChan s t = forever $ do
       (msg, _) <- receiveMessage s
       forkIO $ write2TChan msg t
  
-appendMsg :: String -> KEY -> Qcfg -> TMap -> IO Int
-appendMsg newmsgs key qcfg m =
+appendMsg :: (Serialize a) => a -> KEY -> Cmq a -> TMap a -> IO Int
+appendMsg newmsgs key cmq m =
       atomically $ do
          mT <- readTVar m
          messages' <- case (Map.lookup key mT) of
                            Nothing -> let messages' = [] in return messages'
                            _ -> let Just messages' = Map.lookup key mT in return messages'
-         let l = length . concat $ messages'
-             l' = l + length newmsgs
-         let env = runReader getQthresh qcfg
+         let l = B.length $ S.encode messages'
+             l' = l + (B.length $ S.encode newmsgs)
+         let env = runReader getQthresh cmq
          if l' < env then writeTVar m (Map.adjust (++ [newmsgs]) key mT) else writeTVar m mT
          return (env - l')
 
-insertSglton :: String -> KEY -> TPSQ -> TMap -> IO ()
+insertSglton :: a -> KEY -> TPSQ -> TMap a -> IO ()
 insertSglton newmsgs key q m = do
       time <- getPOSIXTime
       atomically $ do
       qT <- readTVar q
       mT <- readTVar m
       writeTVar q (PSQ.insert key time qT)
-      writeTVar m (Map.insert key (words newmsgs) mT)
+      writeTVar m (Map.insert key [newmsgs] mT)
       return ()
 
-cwPush :: Socket -> KEY -> String -> Qcfg -> IO ()
-cwPush s key newmsgs qcfg = do
+-- | A message is pushed to CMQ. 
+
+cwPush :: (Serialize a) => Socket -> KEY -> a -> Cmq a -> IO ()
+cwPush s key newmsgs cmq = do
      now <- getPOSIXTime
-     let m = getTMap qcfg
-     let q = getTPsq qcfg
+     let m = runReader getTMap cmq
+     let q = runReader getTPsq cmq
      qT <- atomically $ readTVar q
      case (PSQ.lookup key qT) of
           Nothing -> insertSglton newmsgs key q m
-          _ -> do  result <- appendMsg newmsgs key qcfg m
+          _ -> do  result <- appendMsg newmsgs key cmq m
                    when (result <= 0) (transMit s now key newmsgs q m)
 
-sendq :: Socket -> B.ByteString -> String -> PortNumber -> IO ()
 sendq s datastring host port = do
      hostAddr <- inet_addr host
      sendAllTo s datastring (SockAddrInet port hostAddr)
 
-transMit :: Socket -> POSIXTime -> KEY -> String -> TPSQ -> TMap -> IO ()
+transMit :: (Serialize a) => Socket -> POSIXTime -> KEY -> a -> TPSQ -> TMap a -> IO ()
 transMit s time key newmsgs q m = do
      loopAction <- atomically $ do
                        mT <- readTVar m
@@ -136,10 +159,10 @@ transMit s time key newmsgs q m = do
                        writeTVar m (Map.insert key [newmsgs] mT')
                        return $ case Map.lookup key mT of
                                      Nothing -> return ()
-                                     Just messages -> sendq s (B.pack $ unwords messages) (show a) 4711
+                                     Just messages -> sendq s (S.encode messages) (show a) 4711
      loopAction
 
-transMit2 :: Socket -> POSIXTime -> KEY -> TPSQ -> TMap -> IO ()
+transMit2 :: (Serialize a) => Socket -> POSIXTime -> KEY -> TPSQ -> TMap a -> IO ()
 transMit2 s time key q m = do
      loopAction2 <- atomically $ do
                        mT <- readTVar m
@@ -149,33 +172,34 @@ transMit2 s time key q m = do
                        let qT' = PSQ.delete key qT
                        writeTVar q qT'
                        writeTVar m mT'
-                       return (let Just messages = Map.lookup key mT in sendq s (B.pack $ unwords messages) (show a)  4711)
+                       return (let Just messages = Map.lookup key mT in sendq s (S.encode messages) (show a)  4711)
      loopAction2
 
-loopMyQ s qcfg q m = forever $ do
+loopMyQ s cmq q m = forever $ do
 
       b <- atomically $ do q' <- readTVar q
                            case PSQ.findMin q' of
                               Just b  -> return b
                               Nothing -> retry
 
-      let tdelay= runReader getDelay qcfg
+      let tdelay= runReader getDelay cmq
       let duetime = (PSQ.prio b) + (fromRational $ tdelay / 1000)
       let key = (PSQ.key b)
       now <- getPOSIXTime
       when (now > duetime) (transMit2 s now key q m)
       threadDelay 20 --this may need to be adjusted manually
 
-write2TChan :: String -> TChan String -> IO ()
+write2TChan :: [a] -> TChan a -> IO ()
 write2TChan msg mtch = do
-        let mymessages = words msg
-        mapM_ (\x -> atomically $ writeTChan mtch x) mymessages
+        mapM_ (\x -> atomically $ writeTChan mtch x) msg
         return ()
 
-cwPop :: Qcfg -> IO (Maybe String)
-cwPop qcfg = do
-        let mtch = getTChan qcfg
-        let m = getTMap qcfg
+-- | A message is popped of CMQ.
+
+cwPop :: Cmq a -> IO (Maybe a)
+cwPop cmq = do
+        let mtch = runReader getTChan cmq
+        let m = runReader getTMap cmq
         empty <- atomically $ isEmptyTChan mtch
         case empty of
              False -> do m <- atomically $ readTChan mtch
@@ -184,7 +208,9 @@ cwPop qcfg = do
         --Checks whether messages have arrived or not
         --before read is attempted. Makes the Pop non-blocking
 
-receiveMessage :: Socket -> IO (String, SockAddr)
+receiveMessage :: (Serialize a) => Socket -> IO (a, SockAddr)
 receiveMessage s  = do
         (msg, remoteSockAddr) <- recvFrom s 512 --influence on performance and best value still under investigation
-        return (B.unpack $ msg, remoteSockAddr)
+        case S.decode msg of
+             --Left str -> putStrLn str
+             Right res -> return (res, remoteSockAddr)
