@@ -1,4 +1,5 @@
 ---------------------------------------------------------------------------
+-- |
 -- CMQ - A lightweight, asynchronous high-performance messaging queue for
 -- the cloud.
 -- Copyright   : (c) 2012 Joerg Fritsch
@@ -9,16 +10,21 @@
 -- Portability : GHC
 --
 -- A message queue based on the UDP protocol.
+--
 ----------------------------------------------------------------------------
 
 module System.CMQ (
-                   -- The queue identifier
+                   -- * The queue identifier (Token)
                    Cmq
+                   -- * IPv4 address of the destination node
+                   , IPv4
+                   -- * The destination identifier (KEY)
+                   , KEY
                    -- * Construction
                    , newRq
                    -- * Insertion (Push Message)
                    , cwPush
-                   -- * Quey (Pop a Message)
+                   -- * Query (Pop a Message)
                    , cwPop
 ) where
 
@@ -54,12 +60,11 @@ import Data.IP
 --qthresh = 1440 (MTU minus some overhead)
 --qthresh = 512 (most commen UDP packet size e.g. DNS)
 
-type KEY = (IPv4, Integer) -- ^ The 'KEY' identifies the message destination in the format IPv4 address, Integer.
+type KEY = ( IPv4 , Integer ) -- ^ The 'KEY' identifies the message destination in the format 'IPv4' address, Integer.  
 type TPSQ = TVar (PSQ.PSQ KEY POSIXTime)
 type TMap a = TVar (Map.Map KEY [a]) 
 
--- | This module defines the type Cmq.
--- | @k :-> p@ binds the key @k@ with the priority @p@.
+-- | General purpose finite queue.
 data Cmq a = Cmq { qthresh :: Int, tdelay :: Rational, cwpsq :: TPSQ, cwmap :: TMap a, cwchan :: TChan a }
 
 getQthresh :: Reader (Cmq a) Int
@@ -89,7 +94,7 @@ getTChan = do
 
 -- | Builds and returns a new instance of Cmq.
 
-newRq :: Serialize a => Socket -- ^ Socket must not be in connected state. 
+newRq :: Serialize a => Socket -- ^ Socket does not need to be in connected state. 
          -> Int         -- ^ Maximum Queue length in bytes.
          -> Rational    -- ^ Maximum Queue age in ms.
          -> IO (Cmq a)  -- ^ Token returned to identify the Queue.
@@ -107,7 +112,7 @@ loadTChan s t = forever $ do
       (msg, _) <- receiveMessage s
       forkIO $ write2TChan msg t
  
-appendMsg :: (Serialize a) => a -> KEY -> Cmq a -> TMap a -> IO Int
+appendMsg :: Serialize a => a -> KEY -> Cmq a -> TMap a -> IO Int
 appendMsg newmsgs key cmq m =
       atomically $ do
          mT <- readTVar m
@@ -132,7 +137,7 @@ insertSglton newmsgs key q m = do
 
 -- | A message is pushed to CMQ. 
 
-cwPush :: (Serialize a) => Socket -> KEY -> a -> Cmq a -> IO ()
+cwPush :: Serialize a => Socket -> KEY -> a -> Cmq a -> IO ()
 cwPush s key newmsgs cmq = do
      now <- getPOSIXTime
      let m = runReader getTMap cmq
@@ -147,7 +152,7 @@ sendq s datastring host port = do
      hostAddr <- inet_addr host
      sendAllTo s datastring (SockAddrInet port hostAddr)
 
-transMit :: (Serialize a) => Socket -> POSIXTime -> KEY -> a -> TPSQ -> TMap a -> IO ()
+transMit :: Serialize a => Socket -> POSIXTime -> KEY -> a -> TPSQ -> TMap a -> IO ()
 transMit s time key newmsgs q m = do
      loopAction <- atomically $ do
                        mT <- readTVar m
@@ -162,7 +167,7 @@ transMit s time key newmsgs q m = do
                                      Just messages -> sendq s (S.encode messages) (show a) 4711
      loopAction
 
-transMit2 :: (Serialize a) => Socket -> POSIXTime -> KEY -> TPSQ -> TMap a -> IO ()
+transMit2 :: Serialize a => Socket -> POSIXTime -> KEY -> TPSQ -> TMap a -> IO ()
 transMit2 s time key q m = do
      loopAction2 <- atomically $ do
                        mT <- readTVar m
@@ -194,7 +199,7 @@ write2TChan msg mtch = do
         mapM_ (\x -> atomically $ writeTChan mtch x) msg
         return ()
 
--- | A message is popped of CMQ.
+-- | A message is popped of CMQ. The next value is read from the queue.
 
 cwPop :: Cmq a -> IO (Maybe a)
 cwPop cmq = do
