@@ -1,16 +1,19 @@
----------------------------------------------------------------------------
--- |
--- Module     :   System.CMQ
--- Copyright  :   Copyright (c) 2012 cmq authors
--- License    :   BSD3
--- Author     :   Joerg Fritsch
--- Maintainer :   J.Fritsch@cs.cardiff.ac.uk
--- Stability  :   Experimental
--- Tested-With:   GHC == 7.4.1
---
--- CMQ, a UDP-based inherently asynchronous message queue to orchestrate messages, events and processes in the cloud.
---
-----------------------------------------------------------------------------
+{- |
+
+CMQ, a UDP-based inherently asynchronous message queue to orchestrate messages, 
+events and processes in the cloud. It trades guarantees, consistency mechanisms, 
+(shared) state and transactions for robustness, scalability and performance.
+CMQ fares especially well in modern Layer 2 switches in data center networks, 
+as well as in the presence of errors. 
+A 'Message' is pushed to the queue together with a queue identifier ('Cmq') 
+and a 'KEY' that specifies the recipient. Messages can be pushed in logarithmic 
+time and the next message can be retrieved in constant time. 
+
+This implementation is based on
+
+* Fritsch, J., Walker, C. /CMQ - A lightweight, asynchronous high-performance messaging queue for the cloud (2012).
+
+-}
 
 module System.CMQ (
                    -- * The queue identifier (Token)
