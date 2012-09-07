@@ -128,11 +128,10 @@ appendMsg newmsgs key cmq m =
          messages' <- case (Map.lookup key mT) of
                            Nothing -> let messages' = [] in return messages'
                            _ -> let Just messages' = Map.lookup key mT in return messages'
-         let l = B.length $ S.encode messages'
-             l' = l + (B.length $ S.encode newmsgs)
+         let l = B.length $ S.encode (newmsgs : messages')
          let env = runReader getQthresh cmq
-         if l' < env then writeTVar m (Map.adjust (++ [newmsgs]) key mT) else writeTVar m mT
-         return (env - l')
+         if l < env then writeTVar m (Map.adjust (++ [newmsgs]) key mT) else writeTVar m mT
+         return (env - l)
 
 insertSglton :: a -> KEY -> TPSQ -> TMap a -> IO ()
 insertSglton newmsgs key q m = do
@@ -161,8 +160,10 @@ cwPush s key newmsgs cmq = do
           _ -> do  result <- appendMsg newmsgs key cmq m
                    when (result <= 0) (transMit s now key newmsgs q m)
 
-sendq s datastring host port = do
+sendq :: Socket -> B.ByteString -> String -> IO PortNumber -> IO ()
+sendq s datastring host ioport = do
      hostAddr <- inet_addr host
+     port <- ioport
      sendAllTo s datastring (SockAddrInet port hostAddr)
 
 transMit :: Serialize a => Socket -> POSIXTime -> KEY -> a -> TPSQ -> TMap a -> IO ()
@@ -177,7 +178,7 @@ transMit s time key newmsgs q m = do
                        writeTVar m (Map.insert key [newmsgs] mT')
                        return $ case Map.lookup key mT of
                                      Nothing -> return ()
-                                     Just messages -> sendq s (S.encode messages) (show a) 4711
+                                     Just messages -> sendq s (S.encode messages) (show a) (socketPort s)
      loopAction
 
 transMit2 :: Serialize a => Socket -> POSIXTime -> KEY -> TPSQ -> TMap a -> IO ()
@@ -190,9 +191,10 @@ transMit2 s time key q m = do
                        let qT' = PSQ.delete key qT
                        writeTVar q qT'
                        writeTVar m mT'
-                       return (let Just messages = Map.lookup key mT in sendq s (S.encode messages) (show a)  4711)
+                       return (let Just messages = Map.lookup key mT in sendq s (S.encode messages) (show a)  (socketPort s))
      loopAction2
 
+loopMyQ :: Serialize a => Socket -> Cmq a -> TVar (PSQ.PSQ KEY POSIXTime) -> TMap a -> IO ()
 loopMyQ s cmq q m = forever $ do
 
       b <- atomically $ do q' <- readTVar q
